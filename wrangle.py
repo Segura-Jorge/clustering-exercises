@@ -26,36 +26,35 @@ def acquire_zillow():
     - return a df of the given query from the zillow
     """
     sql_query = """
-        SELECT 
+    SELECT 
     p.*, 
-    ac.*, 
-    pr.*, 
-    plt.*, 
-    arc.*, 
-    bc.*, 
-    ht.*, 
-    pl.*, 
-    st.*, 
-    tct.*
-FROM 
+    ac.airconditioningdesc, 
+    pr.logerror, pr.transactiondate, 
+    plt.propertylandusedesc, 
+    arc.architecturalstyledesc, 
+    bc.buildingclassdesc, 
+    ht.heatingorsystemdesc, 
+    pl.propertylandusedesc, 
+    st.storydesc
+    FROM 
     zillow.properties_2017 AS p
-LEFT JOIN 
+    LEFT JOIN 
     airconditioningtype AS ac ON p.airconditioningtypeid = ac.airconditioningtypeid
-LEFT JOIN 
+    LEFT JOIN 
     architecturalstyletype AS arc ON p.architecturalstyletypeid = arc.architecturalstyletypeid
-LEFT JOIN 
+    LEFT JOIN 
     buildingclasstype AS bc ON p.buildingclasstypeid = bc.buildingclasstypeid
-LEFT JOIN 
+    LEFT JOIN 
     heatingorsystemtype AS ht ON p.heatingorsystemtypeid = ht.heatingorsystemtypeid
-LEFT JOIN 
+    LEFT JOIN 
     propertylandusetype AS pl ON p.propertylandusetypeid = pl.propertylandusetypeid
-LEFT JOIN 
+    LEFT JOIN 
     storytype AS st ON p.storytypeid = st.storytypeid
-LEFT JOIN 
+    LEFT JOIN 
     typeconstructiontype AS tct ON p.typeconstructiontypeid = tct.typeconstructiontypeid
-INNER JOIN 
+    INNER JOIN 
     predictions_2017 AS pr ON p.id = pr.id 
-INNER JOIN 
+    INNER JOIN 
     (SELECT 
          id, 
          MAX(transactiondate) AS MaxDate 
@@ -63,13 +62,13 @@ INNER JOIN
          predictions_2017 
      GROUP BY 
          id) AS latest_pr ON pr.id = latest_pr.id AND pr.transactiondate = latest_pr.MaxDate
-LEFT JOIN 
+    LEFT JOIN 
     propertylandusetype AS plt ON p.propertylandusetypeid = plt.propertylandusetypeid
-WHERE 
-    YEAR(pr.transactiondate) = 2017;
+    WHERE 
+    YEAR(pr.transactiondate) = 2017
+    AND p.propertylandusetypeid IN (261);
 
         """
-    
     url = get_db_url('zillow')
     
     df = pd.read_sql(sql_query, url)
@@ -102,70 +101,118 @@ def summarize(df) -> None:
     print('--------------------------------')
     # print out continuous descriptive stats
     print(f'Continuous Column Stats:')
-    print(df.describe())
+    print(df.describe().T)
     print('--------------------------------')
     # print out objects/categorical stats:
     print(f'Categorical Column Stats:')
-    print(df.select_dtypes('O').describe())
+    print(df.select_dtypes('O').describe().T)
     print('--------------------------------')
     print('Missing Values by Column: ')
-    print(df.isna().sum())
+    print(missing_by_column(df))
     print('Missing Values by Row: ')
     print(missing_by_row(df))
     print('--------------------------------')
     print('--------------------------------')
 
-    
+def missing_by_column(df):
+    """
+    Calculate the number and percentage of missing values for each column in a DataFrame.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame to calculate missing values for.
+
+    Returns:
+    pd.DataFrame: A DataFrame with the count and percentage of missing values for each column.
+    """
+    total_rows = len(df)
+    missing_info = pd.DataFrame({
+        'num_rows_missing': df.isna().sum(),
+        'pct_rows_missing': (df.isna().sum() / total_rows) * 100
+    })
+    return missing_info
+
 def missing_by_row(df):
     return pd.concat(
         [
             df.isna().sum(axis=1),
             (df.isna().sum(axis=1) / df.shape[1])
         ], axis=1).rename(
-        columns={0:'missing_cells', 1:'percent_missing'}
+        columns={0:'num_rows_missing', 1:'pct_rows_missing'}
     ).groupby(
-        ['missing_cells',
-         'percent_missing']
-    ).count().reset_index().rename(columns = {'index': 'num_mising'})
+        ['num_rows_missing',
+         'pct_rows_missing']
+    ).count().reset_index()
 
 
+def get_zillow_data():
+    """
+    This function will:
+    - Check local directory for csv file
+        - return if exists
+    - if csv doesn't exist:
+        - creates df of sql query
+        - writes df to csv
+    - outputs zillow df
+    """
+    filename = 'zillow_2017.csv'
+    
+    if os.path.isfile(filename): 
+        df = pd.read_csv(filename, index_col=0)
+        return df
+    else:
+        df = acquire_zillow()
 
-
-
+        df.to_csv(filename)
+    return df             
+                     
+                     
 def prep_zillow(df):
     '''
     This function takes in a dataframe
     renames the columns and drops nulls values
-    Additionally it changes datatypes for appropriate columns
-    and renames fips to actual county names.
+    Additionally it changes datatypes for appropriate columns and renames fips to actual county names.
     Then returns a cleaned dataframe
     '''
     df = df.set_index('id')
-    df = df.drop(columns=['airconditioningtypeid','architecturalstyletypeid','basementsqft', 'buildingclasstypeid', 'decktypeid',\
-                          'finishedfloor1squarefeet', 'finishedsquarefeet13', 'finishedsquarefeet15', 'finishedsquarefeet50',\
-                          'finishedsquarefeet6', 'poolsizesum', 'pooltypeid10', 'pooltypeid2', 'pooltypeid7', 'propertyzoningdesc',\
-                          'rawcensustractandblock', 'regionidcounty', 'regionidneighborhood', 'storytypeid', 'threequarterbathnbr',\
-                          'typeconstructiontypeid', 'unitcnt', 'yardbuildingsqft17', 'yardbuildingsqft26', 'numberofstories',\
-                          'fireplaceflag', 'taxdelinquencyflag', 'taxdelinquencyyear', 'airconditioningtypeid', 'airconditioningdesc',\
-                          'architecturalstyletypeid', 'architecturalstyledesc', 'buildingclasstypeid', 'buildingclassdesc',\
-                          'storytypeid', 'storydesc', 'typeconstructiontypeid', 'typeconstructiondesc'])
-    df = df.rename(columns = 
-                   {'bedroomcnt':'bedrooms',
-                    'bathroomcnt':'bathrooms',
-                    'landtaxvaluedollarcnt':'tax_land',
-                    'structuretaxvaluedollarcnt':'tax_structure',
-                    'calculatedfinishedsquarefeet':'sqft',
-                    'taxvaluedollarcnt':'taxvalue',
-                    'fips':'county'})
+    df = df.drop(columns=['buildingqualitytypeid','fullbathcnt','heatingorsystemtypeid','garagetotalsqft','finishedsquarefeet12','calculatedbathnbr','airconditioningtypeid','architecturalstyletypeid','basementsqft','buildingclasstypeid','finishedfloor1squarefeet','finishedsquarefeet13','finishedsquarefeet15','finishedsquarefeet50','finishedsquarefeet6','poolsizesum','pooltypeid10','pooltypeid2','pooltypeid7','rawcensustractandblock','regionidcounty','regionidneighborhood','storytypeid','threequarterbathnbr','typeconstructiontypeid','unitcnt','yardbuildingsqft17','yardbuildingsqft26','fireplaceflag','taxdelinquencyflag','taxdelinquencyyear','airconditioningtypeid','architecturalstyletypeid','architecturalstyledesc','buildingclasstypeid','buildingclassdesc','storydesc','storytypeid','typeconstructiontypeid','airconditioningdesc','propertyzoningdesc','heatingorsystemdesc','assessmentyear','censustractandblock','roomcnt','propertylandusedesc','propertylandusedesc'])
+    df = df.rename(columns = {
+                            'bedroomcnt':'bedrooms',
+                            'bathroomcnt':'bathrooms',
+                            'landtaxvaluedollarcnt':'tax_land',
+                            'structuretaxvaluedollarcnt':'tax_structure',
+                            'calculatedfinishedsquarefeet':'sqft',
+                            'taxvaluedollarcnt':'tax_value',
+                            'fips':'county',
+                            'decktypeid':'deck_type',
+                            'garagecarcnt':'garage_cnt',
+                            'hashottuborspa':'hot_tub_spa',
+                            'lotsizesquarefeet':'lot_sqft',
+                            'propertycountylandusecode':'county_code',
+                            'regionidcity':'city_id',
+                            'regionidzip':'zipcode',
+                            'logerror':'log_error',
+                            'transactiondate':'tran_date'})
     
-    make_ints = ['bedrooms','sqft','taxvalue','yearbuilt']
+    nan_to_zero = ['garage_cnt','deck_type','fireplacecnt','hot_tub_spa','poolcnt']
+    for col in nan_to_zero:
+        df[col] = df[col].fillna(0)
+ 
+    nan_to_one = ['numberofstories', 'taxamount']
+    for col in nan_to_one:
+        df[col] = df[col].fillna(1)
+    
+    df = df.dropna()
+    
+    make_ints = ['bedrooms','sqft','tax_value','yearbuilt','deck_type', 'poolcnt','city_id']
 
     for col in make_ints:
         df[col] = df[col].astype(int)
-        
+    
     df.county = df.county.map({6037:'LA',6059:'Orange',6111:'Ventura'})
     
     return df
+
+
 
 
 def split_data(df):
@@ -188,6 +235,7 @@ def split_data(df):
     test -> {test.shape}""")
     
     return train, validate, test
+
 
 
 def preprocess_zillow(df):
